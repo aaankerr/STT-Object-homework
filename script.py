@@ -5,6 +5,7 @@ import argparse
 import json
 import queue
 import time
+from paho.mqtt import client as mqtt_client
 from dataclasses import dataclass
 from typing import Optional
 import numpy as np
@@ -30,6 +31,11 @@ class Config:
     debug_wake: bool
 
 audio_queue: "queue.Queue[bytes]" = queue.Queue()
+BROKER_IP = "10.21.60.231"
+TOPIC = "robot/speech/text"
+
+mqtt = mqtt_client.Client()
+mqtt.connect(BROKER_IP, 1883, 60)
 def audio_callback(indata, frames, time_info, status) -> None:
     if status:
         print(status)
@@ -60,7 +66,7 @@ def pick_input_device(cfg: Config) -> int:
     if cfg.device is not None:
         return cfg.device
   
-  try:
+    try:
         default_devices = sd.default.device
         if isinstance(default_devices, (list, tuple)) and len(default_devices) > 0:
             default_input = default_devices[0]
@@ -164,12 +170,25 @@ def run_session(cfg: Config) -> None:
                     or total_elapsed >= cfg.max_record_seconds
                 ):
                     final_result = json.loads(recognizer.FinalResult())
-                    print(json.dumps({
-                        "result": final_result,
-                    }, ensure_ascii=False))
+                    text = final_result.get("text", "").strip()
+
+                    if text:
+                        message = {
+                            "text": text,
+                            "source": "stt"
+                        }
+
+                        mqtt.publish(
+                            TOPIC,
+                            json.dumps(message)
+                        )
+
+                        print(f"[STT → MQTT]: {message}")
+
                     recognizer = None
                     state = "waiting_for_wake"
                     print("Listening for wake word...")
+
                     
 def parse_args() -> Config:
     parser = argparse.ArgumentParser()
